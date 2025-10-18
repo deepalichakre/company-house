@@ -1,11 +1,13 @@
 options:
   logging: CLOUD_LOGGING_ONLY
-  
+
 steps:
 # Build the container image
 - name: 'gcr.io/cloud-builders/docker'
   args:
     - 'build'
+    - 'f'
+    - 'Dockerfile.dockerfile'
     - '-t'
     - 'asia-south1-docker.pkg.dev/companies-house-pipeline/companies-house-images/companies-house:$SHORT_SHA'
     - '.'
