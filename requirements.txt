@@ -1,0 +1,3 @@
+Flask==2.2.5
+requests==2.31.0
+# add other libs your pipeline needs, e.g., pandas

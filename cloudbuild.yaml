@@ -1,0 +1,17 @@
+steps:
+# Build the container image
+- name: 'gcr.io/cloud-builders/docker'
+  args:
+    - 'build'
+    - '-t'
+    - 'asia-south1-docker.pkg.dev/companies-house-pipeline/companies-house-images/companies-house:$SHORT_SHA'
+    - '.'
+
+# Push the image to Artifact Registry
+- name: 'gcr.io/cloud-builders/docker'
+  args:
+    - 'push'
+    - 'asia-south1-docker.pkg.dev/companies-house-pipeline/companies-house-images/companies-house:$SHORT_SHA'
+
+images:
+- 'asia-south1-docker.pkg.dev/companies-house-pipeline/companies-house-images/companies-house:$SHORT_SHA'
