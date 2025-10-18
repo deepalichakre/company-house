@@ -1,20 +1,32 @@
 options:
   logging: CLOUD_LOGGING_ONLY
-
+  
+# cloudbuild.yaml - builds image, pushes to Artifact Registry, deploys to Cloud Run
+substitutions:
+  _IMAGE_URI: "asia-south1-docker.pkg.dev/companies-house-pipeline/companies-house-images/companies-house"
+  _SERVICE: "companies-house-service"
 steps:
-# Build the container image
-- name: 'gcr.io/cloud-builders/docker'
-  args:
-    - 'build'
-    - '-t'
-    - 'asia-south1-docker.pkg.dev/companies-house-pipeline/companies-house-images/companies-house:$SHORT_SHA'
-    - '.'
+# Build the container and push to Artifact Registry
+- name: "gcr.io/cloud-builders/docker"
+  args: ["build", "-t", "${_IMAGE_URI}:$SHORT_SHA", "."]
+- name: "gcr.io/cloud-builders/docker"
+  args: ["push", "${_IMAGE_URI}:$SHORT_SHA"]
 
-# Push the image to Artifact Registrys
-- name: 'gcr.io/cloud-builders/docker'
+# Deploy to Cloud Run
+- name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+  entrypoint: "bash"
   args:
-    - 'push'
-    - 'asia-south1-docker.pkg.dev/companies-house-pipeline/companies-house-images/companies-house:$SHORT_SHA'
+    - "-c"
+    - |
+      gcloud run deploy ${_SERVICE} \
+        --image=${_IMAGE_URI}:$SHORT_SHA \
+        --region=asia-south1 \
+        --platform=managed \
+        --allow-unauthenticated \
+        --memory=512Mi \
+        --concurrency=80 \
+        --timeout=300s \
+        --quiet
 
 images:
-- 'asia-south1-docker.pkg.dev/companies-house-pipeline/companies-house-images/companies-house:$SHORT_SHA'
+  - "${_IMAGE_URI}:$SHORT_SHA"
