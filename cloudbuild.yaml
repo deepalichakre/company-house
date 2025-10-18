@@ -7,7 +7,7 @@ steps:
     - 'asia-south1-docker.pkg.dev/companies-house-pipeline/companies-house-images/companies-house:$SHORT_SHA'
     - '.'
 
-# Push the image to Artifact Registry
+# Push the image to Artifact Registrys
 - name: 'gcr.io/cloud-builders/docker'
   args:
     - 'push'
