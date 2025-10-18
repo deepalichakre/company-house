@@ -6,7 +6,7 @@ from flask import Flask, request, jsonify
 # try import; if it fails, log the error so we know why
 try:
     # ch_requests.py lives in the same folder (src)
-    from ch_requests import call_companies_house
+    from src.ch_requests import call_companies_house
 except Exception as ex:
     call_companies_house = None
     logging.exception("Unable to import ch_requests.call_companies_house: %s", ex)
