@@ -16,4 +16,4 @@ ENV PORT 8080
 EXPOSE 8080
 
 # Run the app
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "app:app", "--workers", "1", "--threads", "8"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "src.app:app", "--workers", "1", "--threads", "8"]
