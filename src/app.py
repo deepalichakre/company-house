@@ -36,6 +36,7 @@ def run_once():
 
     try:
         inserted_total = 0
+        skipped_total= 0
         page_no = 0
         for items in paginate_companies_house(query=q, items_per_page=100, sleep_sec=1.0):
             page_no += 1
@@ -52,10 +53,12 @@ def run_once():
             if ins_result.get("errors"):
                 logging.error("BQ insert errors page %s: %s", page_no, errors)
                 return jsonify({"status": "error", "page": page_no, "errors": errors}), 500
-            inserted_total += len(rows)
+            inserted_total += ins_result.get("inserted", 0)
+            skipped_total  += ins_result.get("skipped", 0)
+            
             logging.info("Inserted page %s (%s rows)", page_no, len(rows))
 
-        return jsonify({"status": "ok", "inserted": inserted_total}), 200
+        return jsonify({"status": "ok", "inserted": inserted_total,"skipped": skipped_total}), 200
 
     except Exception as e:
         logging.exception("Failed to fetch companies house data")
