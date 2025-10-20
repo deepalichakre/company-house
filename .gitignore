@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+env/
+.venv/
+venv/
+.venv/
+pip-wheel-metadata/
+dist/
+build/
+
+# Byte-compiled / caches
+*.egg-info/
+.eggs/
+
+# IDEs
+.vscode/
+.idea/
+*.sublime-*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# GCP / Docker
+*.log
+.env
+.env.*
+.gcloudignore
+
+# local secrets / credentials
+*.json
+secret_*.txt
+credentials.json

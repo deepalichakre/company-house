@@ -2,14 +2,16 @@
 import os
 import logging
 from flask import Flask, request, jsonify
-
+from normalize import normalize_company_summary
+from bq_writer import insert_rows
 # try import; if it fails, log the error so we know why
 try:
     # ch_requests.py lives in the same folder (src)
-    from src.ch_requests import call_companies_house
+    from ch_requests import paginate_companies_house
+    
 except Exception as ex:
-    call_companies_house = None
-    logging.exception("Unable to import ch_requests.call_companies_house: %s", ex)
+    paginate_companies_house = None
+    logging.exception("Unable to import ch_requests.paginate_companies_house: %s", ex)
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -27,18 +29,34 @@ def health():
 
 @app.route("/run-once", methods=["GET", "POST"])
 def run_once():
-    if call_companies_house is None:
+    if paginate_companies_house is None:
         return jsonify({"status": "error", "message": "ch_requests not available"}), 500
 
-    q = request.args.get("q")
-    if not q:
-        data = request.get_json(silent=True) or {}
-        q = data.get("q", "tesco")
+    q = request.args.get("q") or (request.get_json(silent=True) or {}).get("q", "a")
 
     try:
-        resp_json = call_companies_house(query=q, items_per_page=25, start_index=0)
-        items = resp_json.get("items", [])
-        return jsonify({"status": "ok", "items_returned": len(items)}), 200
+        inserted_total = 0
+        page_no = 0
+        for items in paginate_companies_house(query=q, items_per_page=100, sleep_sec=1.0):
+            page_no += 1
+            rows = [normalize_company_summary(it) for it in items]
+            ins_result = insert_rows(rows)
+            if ins_result.get("errors"):
+                # if any insertion errors, return error
+                return jsonify({"status": "error", "errors": ins_result["errors"]}), 500
+
+            inserted = ins_result.get("inserted", 0)
+            skipped = ins_result.get("skipped", 0)
+            logging.info("Inserted %s rows, skipped %s duplicates on this page", inserted, skipped)
+
+            if ins_result.get("errors"):
+                logging.error("BQ insert errors page %s: %s", page_no, errors)
+                return jsonify({"status": "error", "page": page_no, "errors": errors}), 500
+            inserted_total += len(rows)
+            logging.info("Inserted page %s (%s rows)", page_no, len(rows))
+
+        return jsonify({"status": "ok", "inserted": inserted_total}), 200
+
     except Exception as e:
         logging.exception("Failed to fetch companies house data")
         return jsonify({"status": "error", "message": str(e)}), 500
