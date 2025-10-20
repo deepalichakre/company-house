@@ -2,12 +2,12 @@
 import os
 import logging
 from flask import Flask, request, jsonify
-from normalize import normalize_company_summary
-from bq_writer import insert_rows
+from src.normalize import normalize_company_summary
+from src.bq_writer import insert_rows
 # try import; if it fails, log the error so we know why
 try:
     # ch_requests.py lives in the same folder (src)
-    from ch_requests import paginate_companies_house
+    from src.ch_requests import paginate_companies_house
     
 except Exception as ex:
     paginate_companies_house = None
