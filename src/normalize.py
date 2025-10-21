@@ -3,6 +3,11 @@ import json
 import hashlib
 from datetime import datetime
 from dateutil import parser as dateparser
+try:
+    from src.schema import TABLE_CONFIG
+except ModuleNotFoundError:
+    from schema import TABLE_CONFIG
+
 
 def safe_date_iso(raw):
     """Return ISO date string (YYYY-MM-DD) or None."""
@@ -14,67 +19,92 @@ def safe_date_iso(raw):
     except Exception:
         return None
 
+
 def canonicalize_value(v):
-    """Return a stable string representation for a value to be hashed."""
     if v is None:
         return ""
     if isinstance(v, (list, tuple)):
+        # stable representation for lists used in signature
         return "|".join(str(x).strip().lower() for x in v)
     return str(v).strip().lower()
 
+
 def make_signature(item, keys):
+    text = "||".join(canonicalize_value(item.get(k)) for k in keys)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _coerce_for_schema(field_name, value):
     """
-    Create a deterministic signature (sha256 hex) from the values of `keys` in item.
-    keys: list of field names to use in order.
+    Coerce values into simple scalar types acceptable by BQ schema:
+    - lists/tuples -> joined string (semicolon-separated)
+    - dict -> compact JSON string
+    - leave None / scalar as-is
     """
-    parts = []
-    for k in keys:
-        parts.append(canonicalize_value(item.get(k)))
-    base = "||".join(parts)
-    return hashlib.sha256(base.encode("utf-8")).hexdigest()
+    if value is None:
+        return None
 
-def normalize_company_summary(raw_item):
-    addr = raw_item.get("address") or {}
-    rank_val = raw_item.get("rank")
-    try:
-        rank_val = int(rank_val) if rank_val is not None else None
-    except Exception:
-        rank_val = None
+    # lists -> join to semicolon-separated string
+    if isinstance(value, (list, tuple)):
+        try:
+            return ";".join(str(x) for x in value)
+        except Exception:
+            return json.dumps(value, ensure_ascii=False)
 
-    normalized = {
-        "company_number": raw_item.get("company_number"),
-        "title": raw_item.get("title"),
-        "kind": raw_item.get("kind"),
-        "company_status": raw_item.get("company_status"),
-        "company_type": raw_item.get("company_type"),
-        "snippet": raw_item.get("snippet"),
-        "address_snippet": raw_item.get("address_snippet"),
-        "address_line_1": addr.get("address_line_1") if isinstance(addr, dict) else None,
-        "address_locality": addr.get("locality") if isinstance(addr, dict) else None,
-        "address_country": addr.get("country") if isinstance(addr, dict) else None,
-        "address_postal_code": addr.get("postal_code") if isinstance(addr, dict) else None,
-        "links_self": (raw_item.get("links") or {}).get("self"),
-        "date_of_creation": safe_date_iso(raw_item.get("date_of_creation")),
-        "date_of_cessation": safe_date_iso(raw_item.get("date_of_cessation")),
-        "rank": rank_val,
-        "date_indexed": datetime.utcnow().isoformat(),
-        "raw_json": json.dumps(raw_item, ensure_ascii=False),
-    }
+    # dicts -> JSON string
+    if isinstance(value, dict):
+        try:
+            return json.dumps(value, ensure_ascii=False)
+        except Exception:
+            return str(value)
 
-    # fields to use for dedupe signature (the ones you requested)
-    signature_keys = [
-        "company_number",
-        "title",
-        "kind",
-        "company_status",
-        "company_type",
-        "snippet",
-        "address_snippet",
-        "address_line_1",
-        "address_locality",
-        "address_country",
-        "address_postal_code",
-    ]
-    # compute signature
+    # otherwise return as-is (string/number/bool)
+    return value
+
+
+def normalize_record(table_name, raw_item):
+    """
+    Generic, easy-to-read normalizer.
+    Looks up the normalize_map and signature_keys for the given table_name.
+    Coerces arrays/dicts to strings so BigQuery accepts the row.
+    """
+    if table_name not in TABLE_CONFIG:
+        raise ValueError(f"Unknown table name: {table_name}")
+
+    cfg = TABLE_CONFIG[table_name]
+    normalize_map = cfg["normalize_map"]
+    signature_keys = cfg["signature_keys"]
+
+    normalized = {}
+
+    for field, (path, parent) in normalize_map.items():
+        value = None
+        if parent:
+            parent_obj = raw_item.get(parent) or {}
+            if isinstance(parent_obj, dict):
+                value = parent_obj.get(path)
+        else:
+            value = raw_item.get(path)
+
+        # handle date-like fields deterministically
+        if field.startswith("date_"):
+            value = safe_date_iso(value)
+
+        # if field name ends with _json, store compact JSON string
+        elif field.endswith("_json") and value is not None:
+            try:
+                value = json.dumps(value, ensure_ascii=False)
+            except Exception:
+                value = str(value)
+
+        # coerce lists/dicts into string forms for BQ compatibility
+        else:
+            value = _coerce_for_schema(field, value)
+
+        normalized[field] = value
+
+    # housekeeping
+    normalized["date_indexed"] = datetime.utcnow().isoformat()
+    normalized["raw_json"] = json.dumps(raw_item, ensure_ascii=False)
     normalized["row_signature"] = make_signature(normalized, signature_keys)
     return normalized

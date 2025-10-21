@@ -1,7 +1,22 @@
+# Web framework
 Flask==2.2.5
-requests==2.31.0
 gunicorn==20.1.0
+
+# HTTP client
+requests==2.31.0
+
+# Google Cloud SDK libraries
 google-cloud-secret-manager==2.20.2
 google-cloud-bigquery==3.11.1
+google-cloud-core==2.4.1
+google-api-core==2.15.0
+
+# Date/time parsing
 python-dateutil==2.8.2
-# add other libs your pipeline needs, e.g., pandas
+
+# Logging and typing support (standard but explicit)
+google-auth==2.23.4
+google-cloud-logging==3.6.0
+
+# Optional utilities (nice to have for dev/debug)
+pytz==2023.3

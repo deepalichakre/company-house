@@ -101,6 +101,62 @@ def paginate_companies_house(query="a",
         # polite delay
         time.sleep(sleep_sec)
 
+def fetch_company_detail(identifier: str, by_links_self: bool = False, max_retries: int = 3, sleep_sec: float = 0.5) -> dict:
+    """
+    Fetch company detail JSON.
+    - If by_links_self is False (default), `identifier` is treated as company_number and
+      we call: GET {CH_API_BASE}/company/{company_number}
+    - If by_links_self is True, `identifier` may be a links_self value (e.g. "/company/12345")
+      or a full URL; function will build the full URL if needed.
+    Returns:
+      - dict of JSON on success
+      - {} if 404 (not found)
+      - raises requests.HTTPError for other unrecoverable status codes after retries
+    """
+    api_key = get_secret()
+    auth = HTTPBasicAuth(api_key, "")
+
+    if by_links_self:
+        # accept either full URL or path like "/company/03399300"
+        if identifier.startswith("http://") or identifier.startswith("https://"):
+            url = identifier
+        else:
+            # strip leading slash to avoid double slashes
+            url = CH_API_BASE.rstrip("/") + "/" + identifier.lstrip("/")
+    else:
+        url = f"{CH_API_BASE}/company/{identifier}"
+
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            resp = requests.get(url, auth=auth, timeout=30)
+            if resp.status_code == 404:
+                logging.info("Company detail not found (404) for %s", identifier)
+                return {}
+            if resp.status_code == 429:
+                # rate-limited: wait and retry
+                wait = min(60, (2 ** attempt) * sleep_sec)
+                logging.warning("Rate limited when fetching %s. Sleeping %.1fs (attempt %s)", identifier, wait, attempt)
+                time.sleep(wait)
+                if attempt >= max_retries:
+                    logging.error("Exceeded max_retries=%s for %s (429).", max_retries, identifier)
+                    resp.raise_for_status()
+                continue
+
+            resp.raise_for_status()
+            data = resp.json()
+            return data
+
+        except requests.RequestException as e:
+            logging.exception("Error fetching company detail for %s (attempt %s/%s): %s", identifier, attempt, max_retries, e)
+            if attempt >= max_retries:
+                logging.error("Giving up after %s attempts for %s", attempt, identifier)
+                # re-raise the last exception so caller can decide what to do
+                raise
+            backoff = min(60, (2 ** attempt) * sleep_sec)
+            time.sleep(backoff)
+            continue
 # For standalone test (local run)
 if __name__ == "__main__":
     data = call_companies_house("a", 3)
