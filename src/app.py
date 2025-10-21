@@ -18,10 +18,10 @@ except ModuleNotFoundError:
 # ch_requests should expose paginate_companies_house and fetch_company_detail
 # schema contains project/dataset defaults (optional)
 try:
-    from schema import PROJECT_ID as SCHEMA_PROJECT, DATASET as SCHEMA_DATASET
+    from src.schema import PROJECT_ID as SCHEMA_PROJECT, DATASET as SCHEMA_DATASET
 except Exception:
-    SCHEMA_PROJECT = os.getenv("PROJECT_ID")
-    SCHEMA_DATASET = os.getenv("BQ_DATASET")
+    
+    from schema import PROJECT_ID as SCHEMA_PROJECT, DATASET as SCHEMA_DATASET
 
 # configure logging
 logging.basicConfig(level=logging.INFO)
