@@ -15,11 +15,9 @@ from typing import List, Dict, Set
 
 # prefer schema-defined project/dataset but allow env override
 try:
-    from schema import TABLE_CONFIG, PROJECT_ID as SCHEMA_PROJECT, DATASET as SCHEMA_DATASET
+     from src.schema import TABLE_CONFIG, PROJECT_ID as SCHEMA_PROJECT, DATASET as SCHEMA_DATASET
 except Exception:
-    TABLE_CONFIG = {}
-    SCHEMA_PROJECT = None
-    SCHEMA_DATASET = None
+    from schema import TABLE_CONFIG, PROJECT_ID as SCHEMA_PROJECT, DATASET as SCHEMA_DATASET
 
 PROJECT_ID = os.getenv("PROJECT_ID") or SCHEMA_PROJECT or os.getenv("GCP_PROJECT")
 BQ_DATASET = os.getenv("BQ_DATASET") or SCHEMA_DATASET or "companies_house"
