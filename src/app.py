@@ -5,6 +5,7 @@ import time
 import logging
 from flask import Flask, request, jsonify
 from google.cloud import bigquery
+import json
 # Local imports from src package
 try:
     # package-style imports for production
