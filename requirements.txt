@@ -10,7 +10,8 @@ google-cloud-secret-manager==2.20.2
 google-cloud-bigquery==3.11.1
 google-cloud-core==2.4.1
 google-api-core==2.15.0
-google-cloud-pubsub==3.14.1
+google-cloud-pubsub==2.31.1
+
 
 
 # Date/time parsing
