@@ -131,7 +131,7 @@ def details():
     client = bigquery.Client(project=project)
 
     query = f"""
-    SELECT company_number, links_self
+    SELECT company_number, links_self, row_signature
     FROM `{project}.{dataset}.company_index`
     WHERE company_status = 'active' AND links_self IS NOT NULL
     ORDER BY date_indexed DESC
@@ -163,7 +163,7 @@ def details():
                     continue
 
                 # normalize for company_details and insert
-                detail_row = normalize_record("company_details", detail_json)
+                detail_row = normalize_record("company_details", detail_json, extra_fields={"index_row_signature": r.get("row_signature")})
                 res = insert_rows_for_table("company_details", [detail_row])
                 if res.get("errors"):
                     logger.error("Insert errors for %s: %s", company_number, res["errors"])

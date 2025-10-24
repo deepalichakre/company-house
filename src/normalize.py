@@ -62,12 +62,16 @@ def _coerce_for_schema(field_name, value):
     return value
 
 
-def normalize_record(table_name, raw_item):
+def normalize_record(table_name, raw_item, extra_fields: dict | None = None):
     """
     Generic, easy-to-read normalizer.
     Looks up the normalize_map and signature_keys for the given table_name.
     Coerces arrays/dicts to strings so BigQuery accepts the row.
+    extra_fields: optional dict to attach fields not present in raw_item (e.g. index_row_signature).
     """
+    if extra_fields is None:
+        extra_fields = {}
+
     if table_name not in TABLE_CONFIG:
         raise ValueError(f"Unknown table name: {table_name}")
 
@@ -89,19 +93,19 @@ def normalize_record(table_name, raw_item):
         # handle date-like fields deterministically
         if field.startswith("date_"):
             value = safe_date_iso(value)
-
-        # if field name ends with _json, store compact JSON string
         elif field.endswith("_json") and value is not None:
             try:
                 value = json.dumps(value, ensure_ascii=False)
             except Exception:
                 value = str(value)
-
-        # coerce lists/dicts into string forms for BQ compatibility
         else:
             value = _coerce_for_schema(field, value)
 
         normalized[field] = value
+
+    # Apply overrides / additions (e.g., index_row_signature passed from producer)
+    for k, v in extra_fields.items():
+        normalized[k] = v
 
     # housekeeping
     normalized["date_indexed"] = datetime.utcnow().isoformat()

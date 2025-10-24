@@ -62,6 +62,7 @@ COMPANY_DETAILS_SCHEMA = [
     ("date_indexed", "TIMESTAMP"),
     ("raw_json", "STRING"),
     ("row_signature", "STRING"),
+    ("index_row_signature", "STRING"), 
 ]
 
 # -----------------------------
