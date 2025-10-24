@@ -11,11 +11,13 @@ try:
     from src.normalize import normalize_record
     from src.bq_writer import insert_rows_for_table, ensure_table_exists
     from src.ch_requests import paginate_companies_house, fetch_company_detail
+    from src.producer import publish_messages
 except ModuleNotFoundError:
     # local run from inside src/
     from normalize import normalize_record
     from bq_writer import insert_rows_for_table, ensure_table_exists
     from ch_requests import paginate_companies_house, fetch_company_detail
+    from producer import publish_messages
 # ch_requests should expose paginate_companies_house and fetch_company_detail
 # schema contains project/dataset defaults (optional)
 try:
@@ -198,6 +200,110 @@ def details():
         logger.exception("Failed to run details pipeline: %s", exc)
         return jsonify({"status": "error", "message": str(exc)}), 500
 
+# ---------- /producer endpoint: trigger the diff -> publish to Pub/Sub ----------
+@app.route("/producer", methods=["POST", "GET"])
+def producer_endpoint():
+    """
+    Trigger the producer which diffs company_index -> company_details and publishes
+    messages to Pub/Sub. Accepts:
+      - limit (query param or JSON body) to limit messages published (for testing)
+    Returns JSON: {"status":"ok","published":N}
+    """
+    if publish_messages is None:
+        return jsonify({"status": "error", "message": "producer.publish_messages not available"}), 500
+
+    # read limit from query or JSON body
+    params = request.get_json(silent=True) or {}
+    limit = request.args.get("limit") or params.get("limit")
+    try:
+        limit = int(limit) if limit is not None else None
+    except Exception:
+        limit = None
+
+    try:
+        published = publish_messages(limit=limit)
+        return jsonify({"status": "ok", "published": published}), 200
+    except Exception as exc:
+        logger.exception("Producer failed: %s", exc)
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
+# ---------- /subscriber endpoint: Pub/Sub push target ----------
+@app.route("/subscriber", methods=["POST", "GET"])
+def subscriber_endpoint():
+    """
+    Pub/Sub push target. Expects Pub/Sub push envelope JSON:
+      {"message": {"data": "<base64>", "attributes": {...}}, "subscription": "..."}
+    This handler decodes message.data -> JSON payload with:
+      company_number, links_self, index_row_signature
+    Then it:
+      - does a quick BigQuery check if company_details already has the same index signature
+      - if up-to-date: returns 200 (ACK)
+      - otherwise: fetch detail, normalize with index_row_signature, and insert_rows_for_table
+    """
+    try:
+        envelope = request.get_json(silent=True)
+        if not envelope:
+            logger.error("No JSON payload in subscriber")
+            return ("Bad Request: no JSON", 400)
+
+        msg = envelope.get("message")
+        if not msg:
+            logger.error("No message in envelope")
+            return ("Bad Request: no message", 400)
+
+        data_b64 = msg.get("data")
+        try:
+            payload = json.loads(base64.b64decode(data_b64).decode("utf-8")) if data_b64 else {}
+        except Exception as e:
+            logger.exception("Failed to decode Pub/Sub message data: %s", e)
+            return ("Bad Request: invalid base64/data", 400)
+
+        company_number = payload.get("company_number")
+        links_self = payload.get("links_self")
+        index_sig = payload.get("index_row_signature")
+
+        logger.info("subscriber: message for company_number=%s index_sig=%s", company_number, index_sig)
+
+        # Defensive quick-check: does company_details already have same index_row_signature?
+        project = SCHEMA_PROJECT or os.getenv("PROJECT_ID")
+        dataset = SCHEMA_DATASET or os.getenv("BQ_DATASET") or "companies_house"
+        details_table = f"{project}.{dataset}.company_details"
+        bq_client = bigquery.Client(project=project)
+
+        if company_number:
+            q = f"SELECT index_row_signature FROM `{details_table}` WHERE company_number = @company_number LIMIT 1"
+            job_config = bigquery.QueryJobConfig(
+                query_parameters=[bigquery.ScalarQueryParameter("company_number", "STRING", company_number)]
+            )
+            job = bq_client.query(q, job_config=job_config, location=os.getenv("BQ_LOCATION", "asia-south1"))
+            rows = list(job.result())
+            if rows:
+                existing_sig = rows[0].get("index_row_signature")
+                if existing_sig == index_sig:
+                    logger.info("subscriber: %s is already up-to-date (sig matches). ACKing.", company_number)
+                    return ("", 200)
+
+        # Not up-to-date -> fetch detail and insert
+        detail_json = fetch_company_detail(company_number if company_number else links_self)
+        if not detail_json:
+            logger.info("subscriber: no detail JSON for %s (ACKing).", company_number)
+            return ("", 200)
+
+        # Normalize and attach index signature
+        normalized = normalize_record("company_details", detail_json, extra_fields={"index_row_signature": index_sig})
+
+        # Insert via generic BQ writer
+        res = insert_rows_for_table("company_details", [normalized])
+        if res.get("errors"):
+            logger.error("subscriber: BQ insert errors for %s: %s", company_number, res["errors"])
+            return (jsonify({"status": "error", "errors": res["errors"]}), 500)
+
+        logger.info("subscriber: processed %s -> inserted=%s skipped=%s", company_number, res.get("inserted"), res.get("skipped"))
+        return ("", 200)
+
+    except Exception as exc:
+        logger.exception("subscriber: unhandled error %s", exc)
+        return (jsonify({"status": "error", "message": str(exc)}), 500)
 
 if __name__ == "__main__":
     # helpful debug info printed to console so you can verify binding
