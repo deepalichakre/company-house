@@ -103,106 +103,107 @@ def index():
         return jsonify({"status": "error", "message": str(exc)}), 500
 
 
-@app.route("/details", methods=["POST", "GET"])
-def details():
-    """
-    Fetch company detail records for all active companies in company_index.
-    This endpoint:
-      - queries BQ for company_index rows with company_status='active' and non-null links_self
-      - for each record, calls the detail endpoint and normalizes/inserts into company_details
-    Optional JSON body or query params:
-      limit - integer limit for number of companies to process (for testing)
-      sleep_sec - float seconds to wait between requests (politeness / rate limiting)
-    """
-    if fetch_company_detail is None:
-        return jsonify({"status": "error", "message": "ch_requests.fetch_company_detail not available"}), 500
-
-    # read params
-    params = request.get_json(silent=True) or {}
-    limit = request.args.get("limit") or params.get("limit")
-    sleep_sec = request.args.get("sleep_sec") or params.get("sleep_sec") or 0.5
-    try:
-        limit = int(limit) if limit is not None else None
-    except Exception:
-        limit = None
-    try:
-        sleep_sec = float(sleep_sec)
-    except Exception:
-        sleep_sec = 0.5
-
-    # prepare BigQuery client to fetch active companies
-    project = SCHEMA_PROJECT or os.getenv("PROJECT_ID")
-    dataset = SCHEMA_DATASET or os.getenv("BQ_DATASET") or "companies_house"
-    client = bigquery.Client(project=project)
-
-    query = f"""
-    SELECT company_number, links_self, row_signature
-    FROM `{project}.{dataset}.company_index`
-    WHERE company_status = 'active' AND links_self IS NOT NULL
-    ORDER BY date_indexed DESC
-    """
-    if limit:
-        query += f" LIMIT {limit}"
-
-    try:
-        # ensure details table exists
-        ensure_table_exists("company_details")
-
-        logger.info("Querying active companies to process (limit=%s)...", limit)
-        job = client.query(query)
-        rows_iter = job.result()
-
-        processed = 0
-        inserted_total = 0
-        skipped_total = 0
-        errors = []
-
-        for r in rows_iter:
-            company_number = r.get("company_number")
-            links_self = r.get("links_self")
-            try:
-                # Use company_number to fetch detail (fetch_company_detail uses /company/{number})
-                detail_json = fetch_company_detail(company_number)
-                if not detail_json:
-                    logger.info("No detail found for %s (skipping).", company_number)
-                    continue
-
-                # normalize for company_details and insert
-                detail_row = normalize_record("company_details", detail_json, extra_fields={"index_row_signature": r.get("row_signature")})
-                res = insert_rows_for_table("company_details", [detail_row])
-                if res.get("errors"):
-                    logger.error("Insert errors for %s: %s", company_number, res["errors"])
-                    errors.append({"company_number": company_number, "errors": res["errors"]})
-                else:
-                    inserted_total += res.get("inserted", 0)
-                    skipped_total += res.get("skipped", 0)
-
-                processed += 1
-                # polite pause between API calls
-                time.sleep(sleep_sec)
-                logger.info("processed %s: inserted=%s skipped=%s inserted_total=%s skipped_total=%s", processed,  res.get("inserted", 0), res.get("skipped", 0),inserted_total, skipped_total)
-
-            except Exception as e:
-                logger.exception("Failed processing company %s: %s", company_number, e)
-                errors.append({"company_number": company_number, "exception": str(e)})
-                # don't abort entire run; continue with next company
-                continue
-
-        result = {
-            "status": "ok" if not errors else "partial",
-            "processed": processed,
-            "inserted": inserted_total,
-            "skipped": skipped_total,
-            "errors_count": len(errors),
-            "errors": errors[:10],  # sample first 10 errors for brevity
-        }
-        logger.info("processed %s: inserted=%s skipped=%s", processed, inserted, skipped)
-        return jsonify(result), (200 if not errors else 207)
-
-    except Exception as exc:
-        logger.exception("Failed to run details pipeline: %s", exc)
-        return jsonify({"status": "error", "message": str(exc)}), 500
-
+#@app.route("/details", methods=["POST", "GET"])
+#def details():
+#    """
+#    Fetch company detail records for all active companies in company_index.
+#    This endpoint:
+#      - queries BQ for company_index rows with company_status='active' and non-null links_self
+#      - for each record, calls the detail endpoint and normalizes/inserts into company_details
+#    Optional JSON body or query params:
+#      limit - integer limit for number of companies to process (for testing)
+#      sleep_sec - float seconds to wait between requests (politeness / rate limiting)
+#    """
+#    if fetch_company_detail is None:
+#        return jsonify({"status": "error", "message": "ch_requests.fetch_company_detail not available"}), 500
+#
+#    # read params
+#    params = request.get_json(silent=True) or {}
+#    limit = request.args.get("limit") or params.get("limit")
+#    sleep_sec = request.args.get("sleep_sec") or params.get("sleep_sec") or 0.5
+#    try:
+#        limit = int(limit) if limit is not None else None
+#    except Exception:
+#        limit = None
+#    try:
+#        sleep_sec = float(sleep_sec)
+#    except Exception:
+#        sleep_sec = 0.5
+#
+#    # prepare BigQuery client to fetch active companies
+#    project = SCHEMA_PROJECT or os.getenv("PROJECT_ID")
+#    dataset = SCHEMA_DATASET or os.getenv("BQ_DATASET") or "companies_house"
+#    client = bigquery.Client(project=project)
+#
+#    query = f"""
+#    SELECT company_number, links_self, row_signature
+#    FROM `{project}.{dataset}.company_index`
+#    WHERE company_status = 'active' AND links_self IS NOT NULL
+#    ORDER BY date_indexed DESC
+#    """
+#    if limit:
+#        query += f" LIMIT {limit}"
+#
+#    try:
+#        # ensure details table exists
+#        ensure_table_exists("company_details")
+#
+#        logger.info("Querying active companies to process (limit=%s)...", limit)
+#        job = client.query(query)
+#        rows_iter = job.result()
+#
+#        processed = 0
+#        inserted_total = 0
+#        skipped_total = 0
+#        errors = []
+#
+#        for r in rows_iter:
+#            company_number = r.get("company_number")
+#            links_self = r.get("links_self")
+#            try:
+#                # Use company_number to fetch detail (fetch_company_detail uses /company/{number})
+#                detail_json = fetch_company_detail(company_number)
+#                if not detail_json:
+#                    logger.info("No detail found for %s (skipping).", company_number)
+#                    continue
+#
+#                # normalize for company_details and insert
+#                detail_row = normalize_record("company_details", detail_json, extra_fields={"index_row_signature": r.get("row_signature")})
+#                res = insert_rows_for_table("company_details", [detail_row])
+#                if res.get("errors"):
+#                    logger.error("Insert errors for %s: %s", company_number, res["errors"])
+#                    errors.append({"company_number": company_number, "errors": res["errors"]})
+#                else:
+#                    inserted_total += res.get("inserted", 0)
+#                    skipped_total += res.get("skipped", 0)
+#
+#                processed += 1
+#                # polite pause between API calls
+#                time.sleep(sleep_sec)
+#                logger.info("processed %s: inserted=%s skipped=%s inserted_total=%s skipped_total=%s", processed,  res.get("inserted", 0), res.get("skipped", 0),inserted_total, skipped_total)
+#
+#            except Exception as e:
+#                logger.exception("Failed processing company %s: %s", company_number, e)
+#                errors.append({"company_number": company_number, "exception": str(e)})
+#                # don't abort entire run; continue with next company
+#                continue
+#
+#        result = {
+#            "status": "ok" if not errors else "partial",
+#            "processed": processed,
+#            "inserted": inserted_total,
+#            "skipped": skipped_total,
+#            "errors_count": len(errors),
+#            "errors": errors[:10],  # sample first 10 errors for brevity
+#        }
+#        logger.info("processed %s: inserted=%s skipped=%s", processed, inserted, skipped)
+#        return jsonify(result), (200 if not errors else 207)
+#
+#    except Exception as exc:
+#        logger.exception("Failed to run details pipeline: %s", exc)
+#        return jsonify({"status": "error", "message": str(exc)}), 500
+#
+#
 # ---------- /producer endpoint: trigger the diff -> publish to Pub/Sub ----------
 @app.route("/producer", methods=["POST", "GET"])
 def producer_endpoint():
