@@ -8,6 +8,8 @@ from google.cloud import bigquery
 import json
 import base64
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 # Local imports from src package
 try:
     # package-style imports for production
@@ -15,12 +17,14 @@ try:
     from src.bq_writer import insert_rows_for_table, ensure_table_exists
     from src.ch_requests import paginate_companies_house, fetch_company_detail
     from src.producer import publish_messages
+    from src.insurance_mock import generate_and_load as generate_insurance_mock
 except ModuleNotFoundError:
     # local run from inside src/
     from normalize import normalize_record
     from bq_writer import insert_rows_for_table, ensure_table_exists
     from ch_requests import paginate_companies_house, fetch_company_detail
     from producer import publish_messages
+    from insurance_mock import generate_and_load as generate_insurance_mock
 # ch_requests should expose paginate_companies_house and fetch_company_detail
 # schema contains project/dataset defaults (optional)
 try:
@@ -308,6 +312,42 @@ def subscriber_endpoint():
     except Exception as exc:
         logger.exception("subscriber: unhandled error %s", exc)
         return (jsonify({"status": "error", "message": str(exc)}), 500)
+
+# then add the route
+@app.route("/insurance_mock", methods=["POST", "GET"])
+def insurance_mock_endpoint():
+    """
+    Trigger generation of mock insurance data and load into BigQuery.
+    Optional JSON body:
+      {
+        "project": "<gcp-project-id>",
+        "dataset": "<bq-dataset>",
+        "location": "<bq-location>",
+        "num_policyholders": 1000,
+        "num_policies": 1000
+      }
+    """
+    params = request.get_json(silent=True) or {}
+    project = params.get("project") or SCHEMA_PROJECT or os.getenv("PROJECT_ID")
+    dataset = "health_insurance"
+    #params.get("dataset") or SCHEMA_DATASET or os.getenv("BQ_DATASET")
+    location = params.get("location") or os.getenv("BQ_LOCATION") or "asia-south1"
+    try:
+        num_policyholders = int(params.get("num_policyholders", 1000))
+        num_policies = int(params.get("num_policies", 1000))
+    except Exception:
+        return jsonify({"status": "error", "message": "num_policyholders/num_policies must be integers"}), 400
+
+    if not project or not dataset:
+        return jsonify({"status": "error", "message": "Project and dataset must be set (env or JSON body)"}), 400
+
+    try:
+        result = generate_insurance_mock(project=project, dataset=dataset, location=location,
+                                         num_policyholders=num_policyholders, num_policies=num_policies)
+        return jsonify({"status": "ok", "result": result}), 200
+    except Exception as exc:
+        logger.exception("insurance_mock failed: %s", exc)
+        return jsonify({"status": "error", "message": str(exc)}), 500
 
 if __name__ == "__main__":
     # helpful debug info printed to console so you can verify binding
